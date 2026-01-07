@@ -1,13 +1,13 @@
 package backtest
 
 import (
-	"database/sql"
+	"gorm.io/gorm"
 )
 
-var persistenceDB *sql.DB
+var persistenceDB *gorm.DB
 
 // UseDatabase enables database-backed persistence for all backtest storage operations.
-func UseDatabase(db *sql.DB) {
+func UseDatabase(db *gorm.DB) {
 	persistenceDB = db
 }
 

@@ -79,8 +79,8 @@ func enforceRetentionDB(maxRuns int) {
 		ORDER BY updated_at DESC
 		OFFSET ?
 	`
-	rows, err := persistenceDB.Query(query,
-		finalStates[0], finalStates[1], finalStates[2], finalStates[3], maxRuns)
+	rows, err := persistenceDB.Exec(query,
+		finalStates[0], finalStates[1], finalStates[2], finalStates[3], maxRuns).Rows()
 	if err != nil {
 		return
 	}

@@ -17,17 +17,17 @@ func saveCheckpointDB(runID string, ckpt *Checkpoint) error {
 	if err != nil {
 		return err
 	}
-	_, err = persistenceDB.Exec(`
+	err = persistenceDB.Exec(`
 		INSERT INTO backtest_checkpoints (run_id, payload, updated_at)
 		VALUES (?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(run_id) DO UPDATE SET payload=excluded.payload, updated_at=CURRENT_TIMESTAMP
-	`, runID, data)
+	`, runID, data).Error
 	return err
 }
 
 func loadCheckpointDB(runID string) (*Checkpoint, error) {
 	var payload []byte
-	err := persistenceDB.QueryRow(`SELECT payload FROM backtest_checkpoints WHERE run_id = ?`, runID).Scan(&payload)
+	err := persistenceDB.Raw(`SELECT payload FROM backtest_checkpoints WHERE run_id = ?`, runID).Scan(&payload).Error
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, os.ErrNotExist
@@ -57,25 +57,25 @@ func saveConfigDB(runID string, cfg *BacktestConfig) error {
 	if userID == "" {
 		userID = "default"
 	}
-	_, err = persistenceDB.Exec(`
+	err = persistenceDB.Exec(`
 		INSERT INTO backtest_runs (run_id, user_id, config_json, prompt_template, custom_prompt, override_prompt, ai_provider, ai_model, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(run_id) DO NOTHING
-	`, runID, userID, data, template, cfg.CustomPrompt, cfg.OverrideBasePrompt, cfg.AICfg.Provider, cfg.AICfg.Model, now, now)
+	`, runID, userID, data, template, cfg.CustomPrompt, cfg.OverrideBasePrompt, cfg.AICfg.Provider, cfg.AICfg.Model, now, now).Error
 	if err != nil {
 		return err
 	}
-	_, err = persistenceDB.Exec(`
+	err = persistenceDB.Exec(`
 		UPDATE backtest_runs
 		SET user_id = ?, config_json = ?, prompt_template = ?, custom_prompt = ?, override_prompt = ?, ai_provider = ?, ai_model = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE run_id = ?
-	`, userID, data, template, cfg.CustomPrompt, cfg.OverrideBasePrompt, cfg.AICfg.Provider, cfg.AICfg.Model, runID)
+	`, userID, data, template, cfg.CustomPrompt, cfg.OverrideBasePrompt, cfg.AICfg.Provider, cfg.AICfg.Model, runID).Error
 	return err
 }
 
 func loadConfigDB(runID string) (*BacktestConfig, error) {
 	var payload []byte
-	err := persistenceDB.QueryRow(`SELECT config_json FROM backtest_runs WHERE run_id = ?`, runID).Scan(&payload)
+	err := persistenceDB.Raw(`SELECT config_json FROM backtest_runs WHERE run_id = ?`, runID).Scan(&payload).Error
 	if err != nil {
 		return nil, err
 	}
@@ -96,23 +96,23 @@ func saveRunMetadataDB(meta *RunMetadata) error {
 	if userID == "" {
 		userID = "default"
 	}
-	if _, err := persistenceDB.Exec(`
+	if err := persistenceDB.Exec(`
 		INSERT INTO backtest_runs (run_id, user_id, label, last_error, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(run_id) DO NOTHING
-	`, meta.RunID, userID, meta.Label, meta.LastError, created, updated); err != nil {
+	`, meta.RunID, userID, meta.Label, meta.LastError, created, updated).Error; err != nil {
 		return err
 	}
-	_, err := persistenceDB.Exec(`
+	err := persistenceDB.Exec(`
 		UPDATE backtest_runs
 		SET user_id = ?, state = ?, symbol_count = ?, decision_tf = ?, processed_bars = ?, progress_pct = ?, equity_last = ?, max_drawdown_pct = ?, liquidated = ?, liquidation_note = ?, label = ?, last_error = ?, updated_at = ?
 		WHERE run_id = ?
-	`, userID, string(meta.State), meta.Summary.SymbolCount, meta.Summary.DecisionTF, meta.Summary.ProcessedBars, meta.Summary.ProgressPct, meta.Summary.EquityLast, meta.Summary.MaxDrawdownPct, meta.Summary.Liquidated, meta.Summary.LiquidationNote, meta.Label, meta.LastError, updated, meta.RunID)
+	`, userID, string(meta.State), meta.Summary.SymbolCount, meta.Summary.DecisionTF, meta.Summary.ProcessedBars, meta.Summary.ProgressPct, meta.Summary.EquityLast, meta.Summary.MaxDrawdownPct, meta.Summary.Liquidated, meta.Summary.LiquidationNote, meta.Label, meta.LastError, updated, meta.RunID).Error
 	return err
 }
 
 func loadRunMetadataDB(runID string) (*RunMetadata, error) {
-	var (
+	var result = struct {
 		userID          string
 		state           string
 		label           string
@@ -127,46 +127,46 @@ func loadRunMetadataDB(runID string) (*RunMetadata, error) {
 		liquidationNote string
 		createdISO      string
 		updatedISO      string
-	)
-	err := persistenceDB.QueryRow(`
+	}{}
+	err := persistenceDB.Raw(`
 		SELECT user_id, state, label, last_error, symbol_count, decision_tf, processed_bars, progress_pct, equity_last, max_drawdown_pct, liquidated, liquidation_note, created_at, updated_at
 		FROM backtest_runs WHERE run_id = ?
-	`, runID).Scan(&userID, &state, &label, &lastErr, &symbolCount, &decisionTF, &processedBars, &progressPct, &equityLast, &maxDD, &liquidated, &liquidationNote, &createdISO, &updatedISO)
+	`, runID).Scan(&result).Error
 	if err != nil {
 		return nil, err
 	}
 	meta := &RunMetadata{
 		RunID:     runID,
-		UserID:    userID,
+		UserID:    result.userID,
 		Version:   1,
-		State:     RunState(state),
-		Label:     label,
-		LastError: lastErr,
+		State:     RunState(result.state),
+		Label:     result.label,
+		LastError: result.lastErr,
 		Summary: RunSummary{
-			SymbolCount:     symbolCount,
-			DecisionTF:      decisionTF,
-			ProcessedBars:   processedBars,
-			ProgressPct:     progressPct,
-			EquityLast:      equityLast,
-			MaxDrawdownPct:  maxDD,
-			Liquidated:      liquidated,
-			LiquidationNote: liquidationNote,
+			SymbolCount:     result.symbolCount,
+			DecisionTF:      result.decisionTF,
+			ProcessedBars:   result.processedBars,
+			ProgressPct:     result.progressPct,
+			EquityLast:      result.equityLast,
+			MaxDrawdownPct:  result.maxDD,
+			Liquidated:      result.liquidated,
+			LiquidationNote: result.liquidationNote,
 		},
 	}
 	if meta.UserID == "" {
 		meta.UserID = "default"
 	}
-	if t, err := time.Parse(time.RFC3339, createdISO); err == nil {
+	if t, err := time.Parse(time.RFC3339, result.createdISO); err == nil {
 		meta.CreatedAt = t
 	}
-	if t, err := time.Parse(time.RFC3339, updatedISO); err == nil {
+	if t, err := time.Parse(time.RFC3339, result.updatedISO); err == nil {
 		meta.UpdatedAt = t
 	}
 	return meta, nil
 }
 
 func loadRunIDsDB() ([]string, error) {
-	rows, err := persistenceDB.Query(`SELECT run_id FROM backtest_runs ORDER BY updated_at DESC`)
+	rows, err := persistenceDB.Raw(`SELECT run_id FROM backtest_runs ORDER BY updated_at DESC`).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -183,18 +183,18 @@ func loadRunIDsDB() ([]string, error) {
 }
 
 func appendEquityPointDB(runID string, point EquityPoint) error {
-	_, err := persistenceDB.Exec(`
+	err := persistenceDB.Exec(`
 		INSERT INTO backtest_equity (run_id, ts, equity, available, pnl, pnl_pct, dd_pct, cycle)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, runID, point.Timestamp, point.Equity, point.Available, point.PnL, point.PnLPct, point.DrawdownPct, point.Cycle)
+	`, runID, point.Timestamp, point.Equity, point.Available, point.PnL, point.PnLPct, point.DrawdownPct, point.Cycle).Error
 	return err
 }
 
 func loadEquityPointsDB(runID string) ([]EquityPoint, error) {
-	rows, err := persistenceDB.Query(`
+	rows, err := persistenceDB.Raw(`
 		SELECT ts, equity, available, pnl, pnl_pct, dd_pct, cycle
 		FROM backtest_equity WHERE run_id = ? ORDER BY ts ASC
-	`, runID)
+	`, runID).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -211,18 +211,18 @@ func loadEquityPointsDB(runID string) ([]EquityPoint, error) {
 }
 
 func appendTradeEventDB(runID string, event TradeEvent) error {
-	_, err := persistenceDB.Exec(`
+	err := persistenceDB.Exec(`
 		INSERT INTO backtest_trades (run_id, ts, symbol, action, side, qty, price, fee, slippage, order_value, realized_pnl, leverage, cycle, position_after, liquidation, note)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, runID, event.Timestamp, event.Symbol, event.Action, event.Side, event.Quantity, event.Price, event.Fee, event.Slippage, event.OrderValue, event.RealizedPnL, event.Leverage, event.Cycle, event.PositionAfter, event.LiquidationFlag, event.Note)
+	`, runID, event.Timestamp, event.Symbol, event.Action, event.Side, event.Quantity, event.Price, event.Fee, event.Slippage, event.OrderValue, event.RealizedPnL, event.Leverage, event.Cycle, event.PositionAfter, event.LiquidationFlag, event.Note).Error
 	return err
 }
 
 func loadTradeEventsDB(runID string) ([]TradeEvent, error) {
-	rows, err := persistenceDB.Query(`
+	rows, err := persistenceDB.Raw(`
 		SELECT ts, symbol, action, side, qty, price, fee, slippage, order_value, realized_pnl, leverage, cycle, position_after, liquidation, note
 		FROM backtest_trades WHERE run_id = ? ORDER BY ts ASC
-	`, runID)
+	`, runID).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -243,17 +243,17 @@ func saveMetricsDB(runID string, metrics *Metrics) error {
 	if err != nil {
 		return err
 	}
-	_, err = persistenceDB.Exec(`
+	err = persistenceDB.Exec(`
 		INSERT INTO backtest_metrics (run_id, payload, updated_at)
 		VALUES (?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(run_id) DO UPDATE SET payload=excluded.payload, updated_at=CURRENT_TIMESTAMP
-	`, runID, data)
+	`, runID, data).Error
 	return err
 }
 
 func loadMetricsDB(runID string) (*Metrics, error) {
 	var payload []byte
-	err := persistenceDB.QueryRow(`SELECT payload FROM backtest_metrics WHERE run_id = ?`, runID).Scan(&payload)
+	err := persistenceDB.Raw(`SELECT payload FROM backtest_metrics WHERE run_id = ?`, runID).Row().Scan(&payload)
 	if err != nil {
 		return nil, err
 	}
@@ -265,11 +265,11 @@ func loadMetricsDB(runID string) (*Metrics, error) {
 }
 
 func saveProgressDB(runID string, payload progressPayload) error {
-	_, err := persistenceDB.Exec(`
+	err := persistenceDB.Exec(`
 		UPDATE backtest_runs
 		SET progress_pct = ?, equity_last = ?, processed_bars = ?, liquidated = ?, updated_at = ?
 		WHERE run_id = ?
-	`, payload.ProgressPct, payload.Equity, payload.BarIndex, payload.Liquidated, payload.UpdatedAtISO, runID)
+	`, payload.ProgressPct, payload.Equity, payload.BarIndex, payload.Liquidated, payload.UpdatedAtISO, runID).Error
 	return err
 }
 
@@ -278,9 +278,9 @@ func loadDecisionTraceDB(runID string, cycle int) (*store.DecisionRecord, error)
 	var rows *sql.Rows
 	var err error
 	if cycle > 0 {
-		rows, err = persistenceDB.Query(query+` AND cycle = ? ORDER BY created_at DESC LIMIT 1`, runID, cycle)
+		rows, err = persistenceDB.Raw(query+` AND cycle = ? ORDER BY created_at DESC LIMIT 1`, runID, cycle).Rows()
 	} else {
-		rows, err = persistenceDB.Query(query+` ORDER BY created_at DESC LIMIT 1`, runID)
+		rows, err = persistenceDB.Raw(query+` ORDER BY created_at DESC LIMIT 1`, runID).Rows()
 	}
 	if err != nil {
 		return nil, err
@@ -308,20 +308,20 @@ func saveDecisionRecordDB(runID string, record *store.DecisionRecord) error {
 	if err != nil {
 		return err
 	}
-	_, err = persistenceDB.Exec(`
+	err = persistenceDB.Exec(`
 		INSERT INTO backtest_decisions (run_id, cycle, payload)
 		VALUES (?, ?, ?)
-	`, runID, record.CycleNumber, data)
+	`, runID, record.CycleNumber, data).Error
 	return err
 }
 
 func loadDecisionRecordsDB(runID string, limit, offset int) ([]*store.DecisionRecord, error) {
-	rows, err := persistenceDB.Query(`
+	rows, err := persistenceDB.Raw(`
 		SELECT payload FROM backtest_decisions
 		WHERE run_id = ?
 		ORDER BY id DESC
 		LIMIT ? OFFSET ?
-	`, runID, limit, offset)
+	`, runID, limit, offset).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -428,10 +428,10 @@ func writeJSONLinesToZip[T any](z *zip.Writer, name string, items []T) error {
 }
 
 func writeDecisionLogsToZip(z *zip.Writer, runID string) error {
-	rows, err := persistenceDB.Query(`
+	rows, err := persistenceDB.Raw(`
 		SELECT id, cycle, payload FROM backtest_decisions
 		WHERE run_id = ? ORDER BY id ASC
-	`, runID)
+	`, runID).Rows()
 	if err != nil {
 		return err
 	}
@@ -458,11 +458,11 @@ func writeDecisionLogsToZip(z *zip.Writer, runID string) error {
 }
 
 func listIndexEntriesDB() ([]RunIndexEntry, error) {
-	rows, err := persistenceDB.Query(`
+	rows, err := persistenceDB.Raw(`
 		SELECT run_id, state, symbol_count, decision_tf, equity_last, max_drawdown_pct, created_at, updated_at, config_json
 		FROM backtest_runs
 		ORDER BY updated_at DESC
-	`)
+	`).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -494,6 +494,5 @@ func listIndexEntriesDB() ([]RunIndexEntry, error) {
 }
 
 func deleteRunDB(runID string) error {
-	_, err := persistenceDB.Exec(`DELETE FROM backtest_runs WHERE run_id = ?`, runID)
-	return err
+	return persistenceDB.Exec(`DELETE FROM backtest_runs WHERE run_id = ?`, runID).Error
 }
